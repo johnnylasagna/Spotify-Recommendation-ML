@@ -162,6 +162,10 @@ python -m vibecheck_recs <playlist_url> -o recommendations.json
 ## 🧪 Testing
 
 ```bash
+python -m streamlit run vibecheck_recs/app.py
+```
+
+```bash
 # Run with a test playlist
 python -m vibecheck_recs "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M" -v
 
