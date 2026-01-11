@@ -20,6 +20,18 @@ from vibecheck_recs.config import NUM_RECOMMENDATIONS, SPOTIFY_CLIENT_ID, SPOTIF
 
 
 # =============================================================================
+# COMPATIBILITY HELPERS
+# =============================================================================
+def safe_rerun():
+    """Rerun the app - compatible with old and new Streamlit versions."""
+    try:
+        st.rerun()
+    except AttributeError:
+        # Older Streamlit versions use experimental_rerun
+        st.experimental_rerun()
+
+
+# =============================================================================
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
@@ -302,7 +314,7 @@ def main():
                 if client_id and client_secret:
                     set_credentials(client_id, client_secret)
                     st.success("✅ Credentials saved!")
-                    st.rerun()
+                    safe_rerun()
                 else:
                     st.error("Please enter both Client ID and Secret")
         

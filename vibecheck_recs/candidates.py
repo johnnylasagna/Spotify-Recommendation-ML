@@ -325,7 +325,8 @@ class CandidateGenerator:
         Prioritize candidates when we have too many.
         
         Uses quick heuristics:
-        - Artist overlap with playlist
+        - Artist overlap with playlist (HEAVILY weighted)
+        - Genre overlap signals
         - Popularity similarity
         - Random sampling to maintain diversity
         
@@ -337,32 +338,58 @@ class CandidateGenerator:
             Prioritized subset of candidates
         """
         scored_candidates = []
+        playlist_genres = profile.get_all_genres()
+        playlist_genres_lower = set(g.lower() for g in playlist_genres)
         
         for track_id, track in candidates.items():
             score = 0.0
             
-            # Artist overlap bonus
+            # Artist overlap bonus (VERY HIGH - same artist tracks are gold)
+            artist_match = False
             for artist in track.get('artists', []):
                 if artist.get('id') in profile.unique_artists:
-                    score += 2.0
+                    artist_match = True
+                    # Weight by how often this artist appears
+                    freq = profile.artist_frequency.get(artist.get('id'), 0)
+                    score += 5.0 + (freq * 0.5)  # Strong base + frequency bonus
+            
+            # Genre overlap bonus (check artist genres if available)
+            # This is a rough heuristic since we don't have full track data yet
             
             # Popularity similarity
             track_pop = track.get('popularity', 50)
             pop_diff = abs(track_pop - profile.mean_popularity)
-            score += (100 - pop_diff) / 100.0
+            score += (100 - pop_diff) / 100.0 * 0.5
             
-            # Small random factor for diversity
-            score += random.random() * 0.1
+            # Small random factor for diversity (reduced to not override artist match)
+            score += random.random() * 0.05
             
-            scored_candidates.append((track_id, track, score))
+            scored_candidates.append((track_id, track, score, artist_match))
         
-        # Sort by score
+        # Sort by score (artist matches will be at top due to high weight)
         scored_candidates.sort(key=lambda x: x[2], reverse=True)
         
-        # Take top candidates
+        # Take top candidates, ensuring good mix of same-artist and discovery
         result = {}
-        for track_id, track, score in scored_candidates[:self.config.max_candidates]:
-            result[track_id] = track
+        artist_match_count = 0
+        other_count = 0
+        max_artist_matches = int(self.config.max_candidates * 0.6)  # 60% can be same-artist
+        max_others = int(self.config.max_candidates * 0.4)  # 40% discovery
+        
+        for track_id, track, score, is_artist_match in scored_candidates:
+            if len(result) >= self.config.max_candidates:
+                break
+            
+            if is_artist_match and artist_match_count < max_artist_matches:
+                result[track_id] = track
+                artist_match_count += 1
+            elif not is_artist_match and other_count < max_others:
+                result[track_id] = track
+                other_count += 1
+            elif is_artist_match:
+                # If we've hit other limit but still have artist matches, take them
+                result[track_id] = track
+                artist_match_count += 1
         
         return result
     
@@ -443,15 +470,15 @@ class DiversityFilter:
     Ensures diversity in final recommendations.
     
     Prevents:
-    - Too many tracks from same artist
+    - Too many tracks from same artist (but allows more than before)
     - Too many tracks from same album
     - Too similar genre profiles
     """
     
     def __init__(
         self,
-        max_per_artist: int = 2,
-        max_per_album: int = 1,
+        max_per_artist: int = 3,  # Increased from 2
+        max_per_album: int = 2,   # Increased from 1
         min_genre_diversity: float = 0.3
     ):
         self.max_per_artist = max_per_artist

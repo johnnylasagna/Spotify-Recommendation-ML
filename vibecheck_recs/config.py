@@ -52,17 +52,20 @@ class ScoringWeights:
     """Weights for the hybrid scoring function."""
     # Content-based weights (adjusted for no audio features API)
     audio_similarity: float = 0.0  # Deprecated by Spotify
-    genre_overlap: float = 0.35
-    artist_similarity: float = 0.25
+    genre_overlap: float = 0.30
+    artist_similarity: float = 0.40  # Increased - same artist tracks are highly relevant
     
     # Collaborative weights
-    playlist_cooccurrence: float = 0.10
+    playlist_cooccurrence: float = 0.05
     
     # Popularity calibration
-    popularity_match: float = 0.20
+    popularity_match: float = 0.15
     
     # Diversity bonus (prevents too similar tracks)
-    diversity_bonus: float = 0.10
+    diversity_bonus: float = 0.05
+    
+    # NEW: Release era matching (tracks from similar time periods)
+    era_match: float = 0.05
     
     def to_dict(self) -> Dict[str, float]:
         return {
@@ -72,6 +75,7 @@ class ScoringWeights:
             "playlist_cooccurrence": self.playlist_cooccurrence,
             "popularity_match": self.popularity_match,
             "diversity_bonus": self.diversity_bonus,
+            "era_match": self.era_match,
         }
 
 DEFAULT_WEIGHTS = ScoringWeights()
@@ -88,17 +92,17 @@ class CandidateConfig:
     # Number of top tracks to fetch per artist
     top_tracks_per_artist: int = 10
     
-    # Maximum candidates to consider
-    max_candidates: int = 500
+    # Maximum candidates to consider (increased for better coverage)
+    max_candidates: int = 1000
     
     # Minimum playlist co-occurrence threshold
     min_cooccurrence: float = 0.01
     
-    # Number of albums to explore per artist
-    albums_per_artist: int = 5
+    # Number of albums to explore per artist (increased)
+    albums_per_artist: int = 8
     
     # Number of genre searches to perform
-    genre_search_limit: int = 50
+    genre_search_limit: int = 100
     
     # Use search-based candidate discovery (fallback when related artists unavailable)
     use_search_fallback: bool = True
@@ -141,18 +145,21 @@ OUTPUT_FORMAT = "json"  # json or csv
 # GENRE TAXONOMY (hierarchical grouping for better matching)
 # =============================================================================
 GENRE_HIERARCHY = {
-    "pop": ["pop", "dance pop", "electropop", "synth-pop", "indie pop", "art pop"],
-    "rock": ["rock", "alternative rock", "indie rock", "classic rock", "hard rock", "punk rock"],
-    "hip_hop": ["hip hop", "rap", "trap", "southern hip hop", "east coast hip hop", "west coast hip hop"],
-    "electronic": ["electronic", "edm", "house", "techno", "dubstep", "trance", "drum and bass"],
-    "r_and_b": ["r&b", "soul", "neo soul", "contemporary r&b", "funk"],
-    "latin": ["latin", "reggaeton", "latin pop", "salsa", "bachata", "latin hip hop"],
-    "country": ["country", "modern country", "country rock", "alt-country"],
-    "jazz": ["jazz", "smooth jazz", "jazz fusion", "bebop", "cool jazz"],
-    "classical": ["classical", "orchestra", "chamber music", "opera", "baroque"],
-    "metal": ["metal", "heavy metal", "death metal", "black metal", "thrash metal"],
-    "folk": ["folk", "indie folk", "folk rock", "americana", "singer-songwriter"],
-    "reggae": ["reggae", "dancehall", "dub", "roots reggae"],
+    "pop": ["pop", "dance pop", "electropop", "synth-pop", "indie pop", "art pop", "teen pop", "k-pop", "j-pop", "bedroom pop", "hyperpop"],
+    "rock": ["rock", "alternative rock", "indie rock", "classic rock", "hard rock", "punk rock", "post-punk", "new wave", "shoegaze", "grunge", "garage rock", "psychedelic rock", "prog rock", "art rock", "noise rock"],
+    "hip_hop": ["hip hop", "rap", "trap", "southern hip hop", "east coast hip hop", "west coast hip hop", "underground hip hop", "alternative hip hop", "experimental hip hop", "conscious hip hop", "gangster rap", "boom bap", "cloud rap", "emo rap", "drill", "grime"],
+    "electronic": ["electronic", "edm", "house", "techno", "dubstep", "trance", "drum and bass", "ambient", "idm", "synthwave", "darkwave", "industrial", "breakbeat", "uk garage", "future bass", "lo-fi"],
+    "r_and_b": ["r&b", "soul", "neo soul", "contemporary r&b", "funk", "quiet storm", "new jack swing", "alternative r&b"],
+    "latin": ["latin", "reggaeton", "latin pop", "salsa", "bachata", "latin hip hop", "latin rock", "corridos", "regional mexican"],
+    "country": ["country", "modern country", "country rock", "alt-country", "americana", "bluegrass", "outlaw country"],
+    "jazz": ["jazz", "smooth jazz", "jazz fusion", "bebop", "cool jazz", "free jazz", "nu jazz", "acid jazz"],
+    "classical": ["classical", "orchestra", "chamber music", "opera", "baroque", "romantic era", "contemporary classical", "minimalism"],
+    "metal": ["metal", "heavy metal", "death metal", "black metal", "thrash metal", "doom metal", "progressive metal", "metalcore", "deathcore", "nu metal"],
+    "folk": ["folk", "indie folk", "folk rock", "americana", "singer-songwriter", "acoustic", "freak folk"],
+    "reggae": ["reggae", "dancehall", "dub", "roots reggae", "ska"],
+    "punk": ["punk", "punk rock", "hardcore punk", "pop punk", "post-hardcore", "emo", "screamo"],
+    "experimental": ["experimental", "avant-garde", "noise", "drone", "glitch", "musique concrete", "art pop", "dark ambient"],
+    "world": ["world", "afrobeat", "afropop", "highlife", "bossa nova", "flamenco", "bollywood"],
 }
 
 # Flatten for quick lookup

@@ -163,6 +163,9 @@ class ScoringEngine:
             )
             breakdown.diversity_bonus = diversity_score
             
+            # 7. Era/release year matching
+            era_score = self._compute_era_match(candidate, profile)
+            
             # Compute weighted final score
             final_score = (
                 adjusted_weights.audio_similarity * audio_score +
@@ -170,7 +173,8 @@ class ScoringEngine:
                 adjusted_weights.artist_similarity * artist_score +
                 adjusted_weights.popularity_match * pop_score +
                 adjusted_weights.playlist_cooccurrence * collab_score +
-                adjusted_weights.diversity_bonus * diversity_score
+                adjusted_weights.diversity_bonus * diversity_score +
+                adjusted_weights.era_match * era_score
             )
             
             # Normalize to [0, 1]
@@ -235,11 +239,16 @@ class ScoringEngine:
         breakdown: ScoreBreakdown
     ) -> float:
         """
-        Compute genre similarity using hierarchical matching.
+        Compute genre similarity using hierarchical and fuzzy matching.
         
-        S_genre = weighted_jaccard(G_candidate, G_playlist)
+        S_genre = weighted_jaccard(G_candidate, G_playlist) + fuzzy_bonus
         """
         if not candidate.genres or not profile.genre_distribution:
+            # Give partial credit if parent genres match
+            if candidate.parent_genres and profile.parent_genre_distribution:
+                parent_overlap = candidate.parent_genres & set(profile.parent_genre_distribution.keys())
+                if parent_overlap:
+                    return 0.4  # Decent score for parent genre match
             return 0.0
         
         # Direct overlap with playlist genres (weighted by distribution)
@@ -248,7 +257,7 @@ class ScoringEngine:
             profile
         )
         
-        # Hierarchical similarity (parent genre matching)
+        # Hierarchical + fuzzy similarity (parent genre matching + fuzzy word matching)
         profile_genres = list(profile.genre_distribution.keys())
         hierarchical_sim = self.genre_calculator.hierarchical_similarity(
             candidate.genres,
@@ -261,8 +270,15 @@ class ScoringEngine:
         matched = candidate_genres_lower & playlist_genres_lower
         breakdown.matched_genres = list(matched)
         
-        # Combine (weight direct overlap more)
-        return 0.6 * overlap_score + 0.4 * hierarchical_sim
+        # Parent genre bonus (if no direct match but same parent)
+        parent_bonus = 0.0
+        if not matched and candidate.parent_genres:
+            parent_overlap = candidate.parent_genres & set(profile.parent_genre_distribution.keys())
+            if parent_overlap:
+                parent_bonus = 0.3 * len(parent_overlap) / len(candidate.parent_genres)
+        
+        # Combine: direct overlap (40%) + hierarchical/fuzzy (40%) + parent bonus (20%)
+        return 0.4 * overlap_score + 0.4 * hierarchical_sim + 0.2 * parent_bonus + 0.2 * (1 if matched else 0)
     
     def _compute_artist_similarity(
         self,
@@ -275,8 +291,9 @@ class ScoringEngine:
         Compute artist-based similarity.
         
         Considers:
-        - Direct artist overlap
+        - Direct artist overlap (HEAVILY weighted - same artist tracks are gold)
         - Artist frequency in playlist (repeated artists are more relevant)
+        - Featured artists / collaborations
         """
         if not candidate.artist_ids:
             return 0.0
@@ -284,19 +301,29 @@ class ScoringEngine:
         score = 0.0
         has_overlap = False
         
-        for artist_id in candidate.artist_ids:
+        # Check primary artist (first listed)
+        primary_artist = candidate.artist_ids[0] if candidate.artist_ids else None
+        if primary_artist and primary_artist in playlist_artists:
+            has_overlap = True
+            # Strong bonus for same primary artist
+            freq = profile.artist_frequency.get(primary_artist, 0)
+            total = sum(profile.artist_frequency.values())
+            if total > 0:
+                # Higher weight for tracks from frequently appearing artists
+                artist_weight = (freq / total) * 3 + 0.7  # Base 0.7 + frequency bonus
+                score += min(artist_weight, 1.0)
+        
+        # Check secondary/featured artists
+        for artist_id in candidate.artist_ids[1:]:
             if artist_id in playlist_artists:
                 has_overlap = True
-                # Weight by frequency in playlist
-                freq = profile.artist_frequency.get(artist_id, 0)
-                total = sum(profile.artist_frequency.values())
-                if total > 0:
-                    score += freq / total
+                # Smaller bonus for featured artists
+                score += 0.3
         
         breakdown.artist_overlap = has_overlap
         
         # Cap at 1.0
-        return min(score * 2, 1.0)  # Scale up since overlap is rare
+        return min(score, 1.0)
     
     def _compute_popularity_match(
         self,
@@ -381,12 +408,47 @@ class ScoringEngine:
         """
         return ScoringWeights(
             audio_similarity=0.0,  # Audio features deprecated
-            genre_overlap=0.40,  # Increased
-            artist_similarity=0.30,  # Increased
-            playlist_cooccurrence=0.05,  # Reduced
-            popularity_match=0.15,
-            diversity_bonus=0.10,
+            genre_overlap=0.35,  # Increased
+            artist_similarity=0.45,  # Heavily increased - trust same-artist
+            playlist_cooccurrence=0.02,  # Reduced
+            popularity_match=0.10,
+            diversity_bonus=0.03,
+            era_match=0.05,
         )
+    
+    def _compute_era_match(
+        self,
+        candidate: TrackFeatures,
+        profile: PlaylistProfile
+    ) -> float:
+        """
+        Compute era/release year similarity.
+        
+        Tracks from similar time periods score higher.
+        """
+        if not candidate.release_year:
+            return 0.5  # Neutral if unknown
+        
+        # Get release years from playlist
+        playlist_years = []
+        for tf in profile.track_features:
+            if tf.release_year:
+                playlist_years.append(tf.release_year)
+        
+        if not playlist_years:
+            return 0.5  # Neutral if no playlist years
+        
+        mean_year = np.mean(playlist_years)
+        std_year = np.std(playlist_years) if len(playlist_years) > 1 else 5
+        
+        # Calculate how many standard deviations away
+        year_diff = abs(candidate.release_year - mean_year)
+        
+        # Score decays with distance from mean
+        # Within 3 years = ~1.0, within 10 years = ~0.5
+        score = np.exp(-year_diff / (max(std_year, 3) * 2))
+        
+        return score
 
 
 class BipartiteMatchingEvaluator:

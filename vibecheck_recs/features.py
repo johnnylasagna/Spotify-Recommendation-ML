@@ -443,7 +443,7 @@ class FeatureExtractor:
 
 class GenreSimilarityCalculator:
     """
-    Calculates genre similarity using hierarchical matching.
+    Calculates genre similarity using hierarchical matching and fuzzy logic.
     """
     
     def __init__(self):
@@ -464,6 +464,43 @@ class GenreSimilarityCalculator:
         
         return intersection / union if union > 0 else 0.0
     
+    def fuzzy_genre_match(
+        self,
+        genre1: str,
+        genre2: str
+    ) -> float:
+        """
+        Fuzzy match between two genres.
+        
+        Returns:
+            Score [0, 1] based on substring/similarity
+        """
+        g1 = genre1.lower().strip()
+        g2 = genre2.lower().strip()
+        
+        # Exact match
+        if g1 == g2:
+            return 1.0
+        
+        # One contains the other (e.g., "hip hop" in "underground hip hop")
+        if g1 in g2 or g2 in g1:
+            return 0.8
+        
+        # Share significant words
+        words1 = set(g1.replace('-', ' ').split())
+        words2 = set(g2.replace('-', ' ').split())
+        common_words = words1 & words2
+        
+        # Filter out common filler words
+        filler_words = {'music', 'new', 'modern', 'contemporary', 'classic', 'alternative'}
+        meaningful_common = common_words - filler_words
+        
+        if meaningful_common:
+            # e.g., "indie rock" and "indie pop" share "indie"
+            return 0.6 * len(meaningful_common) / max(len(words1), len(words2))
+        
+        return 0.0
+    
     def hierarchical_similarity(
         self,
         genres1: List[str],
@@ -472,7 +509,7 @@ class GenreSimilarityCalculator:
         """
         Compute hierarchical genre similarity.
         
-        Gives partial credit for matching parent genres.
+        Gives partial credit for matching parent genres and fuzzy matches.
         
         Args:
             genres1, genres2: Genre lists to compare
@@ -488,6 +525,22 @@ class GenreSimilarityCalculator:
         set2 = set(g.lower() for g in genres2)
         exact_sim = self.jaccard_similarity(set1, set2)
         
+        # Fuzzy match score (for genres that are close but not exact)
+        fuzzy_score = 0.0
+        fuzzy_matches = 0
+        for g1 in genres1:
+            best_fuzzy = 0.0
+            for g2 in genres2:
+                score = self.fuzzy_genre_match(g1, g2)
+                if score > best_fuzzy and score < 1.0:  # Exclude exact matches
+                    best_fuzzy = score
+            if best_fuzzy > 0.3:
+                fuzzy_score += best_fuzzy
+                fuzzy_matches += 1
+        
+        if len(genres1) > 0:
+            fuzzy_score = fuzzy_score / len(genres1)
+        
         # Parent match score
         parents1 = set()
         parents2 = set()
@@ -502,8 +555,8 @@ class GenreSimilarityCalculator:
         
         parent_sim = self.jaccard_similarity(parents1, parents2)
         
-        # Weighted combination (exact match weighted more)
-        return 0.7 * exact_sim + 0.3 * parent_sim
+        # Weighted combination (exact > fuzzy > parent)
+        return 0.5 * exact_sim + 0.3 * fuzzy_score + 0.2 * parent_sim
     
     def genre_overlap_with_profile(
         self,
